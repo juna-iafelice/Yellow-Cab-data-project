@@ -1,0 +1,357 @@
+---
+title: "cabDataProject"
+author: "Anthony Saita, Juna Iafelice, Joelle Bracco, Nicholas Weidner"
+date: "5/24/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(modelr)
+library(tidyverse)
+library(hms)
+library(lubridate)
+library(devtools)
+library(ggmap)
+library(lubridate)
+library(viridis)
+library(jsonlite)
+library(randomForest)
+library(prettydoc)
+library(ALSM)
+
+memory.limit(size=10e7)
+### Load files in r, use pathway below with PC Anthony Saitta. 
+January_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-01.csv")
+February_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-02.csv")
+March_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-03.csv")
+April_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-04.csv")
+May_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-05.csv")
+June_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-06.csv")
+July_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-07.csv")
+August_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-08.csv")
+September_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-09.csv")
+October_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-10.csv")
+November_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-11.csv")
+December_2018 <- 
+  read_csv(file = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2018-12.csv")
+
+## Join csv's by r_bind
+nycTaxiData2018 <- rbind(sample_n(January_2018, 
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(February_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(March_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(April_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(May_2018, 
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(June_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(July_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(August_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(September_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(October_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(November_2018,
+                                  size=1000000,
+                                  replace=TRUE),
+                         sample_n(December_2018,
+                                  size=1000000,
+                                  replace=TRUE))
+
+### Join Tables with Geographic Location
+LocationID <- 
+  read_csv(file = "https://raw.githubusercontent.com/anthonysaitta/taxiMapJoin/master/TaxiLocation.csv")
+
+to_lat_long <- function(address,apiKey="AIzaSyB9dDoopjdcRZig0m_0zVNgFAojLpa_HAU",url="https://maps.googleapis.com/maps/api/geocode/json?address=") {
+  cleanAddress <- str_replace_all(address,"/"," ")
+  cleanAddress <- str_replace_all(cleanAddress," ","+")
+  geocode_url <- paste(url,cleanAddress, "&key=" , apiKey, sep="")
+  print(geocode_url)
+  result = fromJSON(str_conv(geocode_url,"UTF-8"))
+  list_result <- list(latitude= result$results$geometry$location$lat, longitude =result$results$geometry$location$lng)
+  print(list_result)
+  return(list_result)
+}
+### Registering Google API key for accessing maps
+
+register_google(key="AIzaSyB9dDoopjdcRZig0m_0zVNgFAojLpa_HAU")
+geocodes <- mutate_geocode(LocationID,taxiName)
+geocodes <- tibble(geocodes)
+write_csv(geocodes,"TaxiLocation.csv")
+
+
+nycTaxiData2018 <- inner_join(nycTaxiData2018,
+                              LocationID,
+                              by=c("PULocationID"="LocationID"))
+nycTaxiData2018 <- inner_join(nycTaxiData2018,
+                              LocationID,
+                              by=c("DOLocationID"="LocationID"))
+
+### Create tibble from rbound table
+taxiData2018 <- tibble(
+  TPEP_Provider = nycTaxiData2018$VendorID,
+  Pickup_Date = ymd(as.Date(nycTaxiData2018$tpep_pickup_datetime)),
+  Pickup_Time = as_hms(nycTaxiData2018$tpep_pickup_datetime),
+  Dropoff_Date = ymd(as.Date(nycTaxiData2018$tpep_dropoff_datetime)),
+  Dropoff_Time = as_hms(nycTaxiData2018$tpep_dropoff_datetime),
+  Number_of_Passengers = nycTaxiData2018$VendorID,
+  Trip_Distance_Miles = nycTaxiData2018$trip_distance,
+  Pickup_Location_ID = nycTaxiData2018$PULocationID,
+  PU_Borough = nycTaxiData2018$Borough.x,
+  PU_Neighbourhood = nycTaxiData2018$taxiName.x,
+  PU_xID = nycTaxiData2018$xID.x,
+  PU_Lat = nycTaxiData2018$latitude.x,
+  PU_Long = nycTaxiData2018$longitude.x,
+  Dropoff_Location_ID = nycTaxiData2018$DOLocationID,
+  DO_Borough = nycTaxiData2018$Borough.y,
+  DO_Neighbourhood = nycTaxiData2018$taxiName.y,
+  DO_xID = nycTaxiData2018$xID.y,
+  DO_Lat = nycTaxiData2018$latitude.y,
+  DO_Long = nycTaxiData2018$longitude.y,
+  Payment_Type_ID = nycTaxiData2018$payment_type, 
+  Fare_Amount = nycTaxiData2018$fare_amount, 
+  Extra_Charges = nycTaxiData2018$extra, 
+  MTA_Tax = nycTaxiData2018$mta_tax,
+  Improvement_Surcharge = nycTaxiData2018$improvement_surcharge, 
+  Tip_Amount = nycTaxiData2018$tip_amount, 
+  Tolls_Amount = nycTaxiData2018$tolls_amount, 
+  Total_Charge_to_Passengers = nycTaxiData2018$total_amount
+)
+
+### Clean data to remove outliers
+taxiDataClean <- 
+  taxiData2018 %>% 
+  select(1:27) %>%
+  filter(Trip_Distance_Miles>0&
+           Trip_Distance_Miles<50&
+           Pickup_Date>=as.Date("2018-01-01")& 
+           Pickup_Date<=as.Date("2018-12-31")&
+           Dropoff_Time-Pickup_Time>0) %>%
+  mutate(Trip_Duration=(Dropoff_Time-Pickup_Time)/60, na.rm=TRUE) %>%
+  select(1:28)
+
+```
+
+### Purpose of the Project
+
+  Yellow Cabs have become synonymous with New York City.  Though struggling with the onslaught on new entrants from shared ride services, New York Yellow Cabs remain an immensely convenient and accessible means of transportation in a city of 8 million inhabitants.  This project will examine the raw data associated with Yellow Cabs in New York from the perspective of a cab driver.  Given the 130 million rows of data, how can a cab driver parse usable information without getting lost in a forest of data?  This project seeks to provide cab driver with useable information to maximize their tipping profits and maximize their days to provide the highest profitability possible in a city inundated with competition. 
+  
+### Overview of Data 
+
+  The data on Yellow Cab trips was obtained from https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page, a New York City organization dedicated to tracking cab data for various purposes that are outlined in the above link.  For more granular analysis, the data is divided into the 12 months of the year.  After combining all the data sets, the Taxi Zone Lookup Table was added to the combined data file to provide borough and neighborhood information for each pickup and dropoff location.  Without the inner joined table, the pickup and dropoff locations would be simple numeric identifiers.  
+  After this inner join, the taxiCabData2018 variable was created, but 130 million rows were far too onerous for the group's systems to work with in a quick and reliable manner.  Use sample_n of 1,000,000 rows from each month, a 12 million row data set entitled nycTaxiData2018 was created.  To further enhance usability further, this new dataset of 12 million was converted into a tibble, with the datetime columns separated into date and time (by seconds).  After the tibble creation, work began on the cleaning of the data. 
+
+  
+### Data Dictionary for Columns
+  To better understand the data set, it’s important to follow the data dictionary and variables the group decided were important to the success of the project.  Accordingly, the following link: https://www1.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf details the column names and their descriptions.  Nothing was edited from the source material except for the following: 
+  tpep_pick_datetime and tpep_dropoff_datetime were changed divided into Pickup_Date/Pickup_Time and Dropoff_Date/Dropoff_Time.  The _date variables are formatted as dates in format of yyyymmdd.  The times are in hms format in seconds, which were converted into minutes for the purposes of analysis.  In addition, Pickup_Location_ID and Dropoff_Location_ID were divided into PULocationID, PU_Borough, PU_Neighbourhood, and PU_ServiceZone.  The Borough and Neighborhood provide character variables with the name of the boroughs and neighborhoods in NYC. 
+
+### Data Cleaning
+
+The data set was cleaned in the following ways:
+  
+  1.  All trips that had negative time values were excluded from the dataset.  (i.e. Dropoff_Time-Pickup_Time must be greater than 0)
+  2.  The Pickup_Date must be between 2018-01-01 and 2018-12-31
+  3.  Trip length is over 0 miles.  
+  4.  Trip length is less than 32 miles (The distance between Newark and LaGuardia Airports)
+  
+  The resulting data set, taxiDataClean, contained 11,785,260 out of 12,000,000 original rows of data.  This equates to a loss of 1.8% of the data. 
+
+
+### Testing Data for Centrality
+  In addition to the cleaning, an additional column was added for Average Trip Length by pickup date to visualize the distribution.  The following graphs below some tests.  When filtering the data for average trip length and summarizing the columns by day (356 days), a historgram is produced that illustrates a normal distribution with a mean slighly higher than the median, indicating a positive skewing of the data.  This is illustrated when outliers are included in the attached box plot, below the histogram, which shows the effect of outliers on the greater majority of data points.  
+
+
+```{r test, include=FALSE}
+### Test Case
+AverageTripLength <- 
+  taxiDataClean %>% 
+  group_by(Pickup_Date) %>%
+  filter(Pickup_Date<=as.Date("2018-12-31")) %>%
+  summarize(avgTripLength = mean(Trip_Distance_Miles), na.rm=TRUE)%>%
+  filter(avgTripLength > 0 & avgTripLength < 32) %>%
+  select(Pickup_Date, (avgTripLength))
+```
+
+```{r histogram1}
+### Test Plot
+ggplot(data=AverageTripLength, aes(x=avgTripLength))+
+  geom_vline(aes(xintercept = mean(avgTripLength)), linetype = 2)+
+  geom_histogram(bins=20, fill='red', color="green", alpha=0.5)+
+  geom_density(col=200) +
+  labs(x="Average Trip Length", y = "Quantity of Trips") + 
+  ggtitle("Distribution of Average Trip Length (Miles)") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r boxplot}
+### Test Plot
+boxplot(taxiDataClean$Total_Charge_to_Passengers)
+
+```
+
+### Predictions and Approach
+
+  Our group is approaching our theory from the lens of maximizing daily income for a proposective Yellow Cab driver.  For many, a large part of their income that they have "control" over is the tips that they are able to generate, both daily and per ride.  Our group theorizes that not only do the two direct inputs to calculating fare: Trip Duration and distance factor into the total tip, but Time of Day and Day of the week do as well.  Payment types other than credit cards have been excluded, as Tip Data is not tracked for non-credit card tips.  In order to analyze potential models of these variables, they will need to be added to the dataframe, and then we can run a random forest as well as a conventional lm() model and check for significance.
+
+```{r taxiTipData, include=FALSE}
+taxiTipData <- taxiDataClean %>%
+  mutate(Fare_Pre_Tip = Total_Charge_to_Passengers - Tip_Amount) %>%
+  filter(Payment_Type_ID==1) %>%
+  mutate(Tip_Percent = (Tip_Amount / Fare_Pre_Tip)*100) %>%
+  mutate(Tip_Per_Minute = Tip_Amount / as.integer(Trip_Duration)) %>%
+  mutate(hour = hour(Pickup_Time), 
+         wday = wday(Pickup_Date, label = TRUE), 
+         month = month(Pickup_Date, label = TRUE)) %>%
+  filter(Tip_Percent>0&Fare_Pre_Tip>=0) %>%
+   na.omit()
+```
+### Random Forest and Model
+  Our initial model as previously mentioned will consist of running a Random Forest on the variables Trip Distance, Trip Duration, Hour, Day of Week and Month.  We will then also run a conventional lm() model and run ANOVA tests to determine which variables are significant to determining Tip Percentage.  We will then run addional models to determine if there is variance between nominal and percent tip signficant variables.
+```{r Random Forest}
+fitted_forest <- randomForest(formula = Tip_Percent ~ Trip_Distance_Miles + Trip_Duration + hour + wday + month,
+                              data =taxiTipData,
+                              ntree = 80, sampsize = 10000)
+
+print(fitted_forest)
+
+importance(fitted_forest)
+```
+As we can see from the output, the model does a relatively poor job of explaining the variance in tip percentage, accounting for only 12% of variance.  What is somewhat surprising though is how much more important Trip Duration appears to be than Trip Distance.  The month, day, hour importance is somewhat inconclusive by this technique, so further analysis will be pursued.
+```{r Traditional lm() and ANOVA}
+TipModel <- lm(Tip_Percent~ Trip_Distance_Miles + Trip_Duration + hour + wday + month, taxiTipData)
+summary(TipModel)
+
+Anova(TipModel)
+```
+
+### Model Validation
+This was a surprising result in our groups opinion.  A traditional linear model determines that for Tip Percentage, the Trip Distance is statisticaly insignificant, but that Month, Day of Week and Hour are all statistically significant.  The Model summary further identifies specific days of the week, times and months which significantly impact Tip Percentage.
+
+Now for Nominal Tips:
+
+```{r Random Forest 2}
+fitted_forest2 <- randomForest(formula = Tip_Amount ~ Trip_Distance_Miles + Trip_Duration + hour + wday + month,
+                              data = taxiTipData,
+                              ntree = 80, sampsize = 10000)
+print(fitted_forest2)
+
+importance(fitted_forest2)
+```
+This output is not surprising, as the Nominal Tip amount is directly a function of Trip Distance and Trip Duration.  It is further not surprising to see that there is little if any impact on Tip Amount depending on the Month, Day of the Week or Hour of day.  With over 68% of variance in Tip Amount explained by the variables above, the model for Tip Amount could be trimmed to just Trip Distance and Trip Duration, and explore location data to improve variance explanation. 
+
+Because Tip Amount is a function of standard trip metrics that the driver has little to no control over, we will divert our focus to Tip Percentage.  Accounting for the variability, minimal though it may be, a prospective driver should look to maximize their tip percentage, if possible.
+
+### Tip Percentage
+Yellow Cabs have pre-set tip selections available for anyone electing to pay by card.  The common presets are visible in the histogram below.
+
+```{r histogram2}
+ggplot(data=taxiTipData, aes(x=Tip_Percent))+
+geom_vline(aes(xintercept = mean(Tip_Percent)), linetype = 2)+
+geom_histogram(bins=40, fill='red', color="blue", alpha=0.5)+
+geom_density(col=100) +
+labs(x="Tip Percentage", y = "Quantity of Trips") + 
+ggtitle("Distribution of Tip Percentage") +
+theme(plot.title = element_text(hjust = 0.5))
+```
+It is quite evident that there is a strong preference for tipping 20%, and that 20% is one of the aforementioned presets.  It is also notable that though there is a noticeable tail towards higher tip percentages, they are dwarfed in impact by tips below 20%, resulting in an average tip of 19.43% for the dataset.
+
+In an effort to pursue tips which are above average, we can now incorporate location data to our previous model in an effort to improve it.
+
+``` {r taxiTipData2, include=FALSE}
+taxiTipData2 <- taxiTipData %>%
+  mutate(PU_Long = as.numeric(PU_Long),
+         PU_Lat = as.numeric(PU_Lat)) %>%
+  na.omit()
+```
+
+
+``` {r Random Forest 3}
+fitted_forest3 <- randomForest(formula = Tip_Percent ~ PU_Lat + PU_Long + Trip_Distance_Miles + Trip_Duration + hour + wday + month,
+                              data = taxiTipData2,
+                              ntree = 80, sampsize = 10000)
+
+print(fitted_forest3)
+importance(fitted_forest3)
+```
+
+Unfortunately, using location data does not appear to improve our model in this case.  We may be attempting to use the wrong model or have the data in the incorrect format to test in this way.  Despite the failure to improve the model, we are still able to utilize the neighborhood data in order to identify neighborhoods that tip above average.  The resulting dataframe provides 3877 observations of pairings of Pickup and Dropoff with average and volume statistics.  Trips which occured in too limited a quantity were excluded, as a trip which occurs once per year is not useful for planning where to focus your driving if you are attempting to maximize tips.  Maybe you get lucky and land the single occurence trip and get excellent tips for that day but the low volume means that trip and the resulting tip are likely extremely infrequent.  As a result, a minimum number of trips of 150 was selected, as this represents trips which should occur with some degree of frequency even if it's not daily.
+
+
+```{r bestTipRoute}
+## Best Tip Routes
+bestTipRoute <-  taxiTipData %>%
+  filter(Tip_Amount != 0, Pickup_Location_ID < 264, Dropoff_Location_ID < 264) %>%
+  group_by(PU_Borough, PU_Neighbourhood, DO_Borough, DO_Neighbourhood) %>%
+  summarise(avgTipPercentage = mean(Tip_Amount/Fare_Pre_Tip*100), AvgTipAmount = mean(Tip_Amount), PU_DO_Count = n())%>%
+  filter(PU_DO_Count > 150) %>%
+  arrange(desc(avgTipPercentage))
+
+head(bestTipRoute, n=10)
+
+```
+
+  When sorting by the largest tip percentage, a few common Neighborhoods pop up - The Financial District in particular -  as well as both Airports in Queens. Those familiar with NYC will also be quick to point out that all of these trips are quite close, either within the same neighborhood or into the adjacent neighborhood.  Additionally, while all the tip amounts are above average, the actual Tip Amount is relatively small.  It is feasible that with enough volume, this could be a valid strategy for maximizing daily tips by trying to mainly operate out of these locations - the financial district in particular featuring three times in the top 10 for tip percentage seems a likely place to begin if this is the chosen strategy.  The volume of trips however, indicated by PU_DU_Count are relatively low given the size of our data set.
+
+  What if we were to however, only consider the pairings where the average tip Percentage is greater than the sample average and look at the volume of trips pairings.  This still should yield higher than average tips, however we can identify neighborhoods with much larger volume numbers and identify a location with more frequent trips if a volume strategy is sought.
+```{r bestTipRoute2}
+sample_AvgTipPct <- mean(bestTipRoute$avgTipPercentage)
+bestTipRoute2 <-  taxiTipData %>%
+  filter(Tip_Amount != 0, Pickup_Location_ID < 264, Dropoff_Location_ID < 264) %>%
+  group_by(PU_Borough, PU_Neighbourhood, DO_Borough, DO_Neighbourhood) %>%
+  summarise(avgTipPercentage = mean(Tip_Amount/Fare_Pre_Tip*100), AvgTipAmount = mean(Tip_Amount), PU_DO_Count = n())%>%
+  filter(avgTipPercentage>sample_AvgTipPct) %>%
+  arrange(desc(PU_DO_Count))
+
+head(bestTipRoute2, n=10)
+```
+
+In this instance, we see lower average Tip Percentage, but substantially higher volume, while still earning above average tips by percent.  Additionally, these locations are geographically distinct from what we saw in our previous case, though they have the same phenomenon of predominantly representing relatively short trips within one or two neighborhoods.  If a cab driver were to focus on using a high volume strategy with frequent short trips earning above average tips, it seems that the neighborhoods surrounding central park would be a good place to start.  
+
+```{r bestTipTime}
+sample_AvgTipPct <- mean(taxiTipData$Tip_Percent)
+
+taxiTipData3 <- taxiTipData %>%
+  filter(Tip_Amount != 0, Pickup_Location_ID < 264, Dropoff_Location_ID < 264) %>%
+  group_by(wday, hour) %>%
+  summarise(avgTipPercentage = mean(Tip_Amount/Fare_Pre_Tip*100), AvgTipAmount = mean(Tip_Amount), PU_DO_Count = n())%>%
+  filter(avgTipPercentage>sample_AvgTipPct, PU_DO_Count > 150) %>%
+  arrange(desc(avgTipPercentage))
+
+head(taxiTipData3, n=20)
+```
+Looking at hour and day of the week when sorted by average Tip Percentage, it appears that late night and very early morning hours are the highest tipping times of day, with friday between 2 am and 5 am appearing as 4 of the best tipping hours during the week.
+
+### Drawing Conclusions
+
+Our initial Random Forest found that Trip Duration, Hour, Day of the Week and Month were all factors when considering how to maximize Tip Percentage.  The Random Forest additionally factored in Trip Distance; however, Linear Models and model validation via ANOVA rejected Trip Distance as not statistically significant.  If the data set is Linear in Nature it would make sense to leave distance out of the equation.  If the Random Forest is a better model, then it is prudent to keep Trip Distance as a part of the model.
+
+Additional testing is needed regardless, as the % of variance explained by the model is insufficient for predictive purposes.  At this time, a prospective yellow cab driver would do best with the knowledge that late nights, in neighborhoods around Central Park are likely the best way to maximize Tip Percentage while still having a high volume of customers.
