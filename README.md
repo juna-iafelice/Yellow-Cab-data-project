@@ -83,22 +83,8 @@ nycTaxiData2018 <- rbind(sample_n(January_2018,
 LocationID <- 
   read_csv(file = "https://raw.githubusercontent.com/anthonysaitta/taxiMapJoin/master/TaxiLocation.csv")
 
-to_lat_long <- function(address,apiKey="AIzaSyB9dDoopjdcRZig0m_0zVNgFAojLpa_HAU",url="https://maps.googleapis.com/maps/api/geocode/json?address=") {
-  cleanAddress <- str_replace_all(address,"/"," ")
-  cleanAddress <- str_replace_all(cleanAddress," ","+")
-  geocode_url <- paste(url,cleanAddress, "&key=" , apiKey, sep="")
-  print(geocode_url)
-  result = fromJSON(str_conv(geocode_url,"UTF-8"))
-  list_result <- list(latitude= result$results$geometry$location$lat, longitude =result$results$geometry$location$lng)
-  print(list_result)
-  return(list_result)
-}
-### Registering Google API key for accessing maps
 
-register_google(key="AIzaSyB9dDoopjdcRZig0m_0zVNgFAojLpa_HAU")
-geocodes <- mutate_geocode(LocationID,taxiName)
-geocodes <- tibble(geocodes)
-write_csv(geocodes,"TaxiLocation.csv")
+
 
 
 nycTaxiData2018 <- inner_join(nycTaxiData2018,
