@@ -1,6 +1,6 @@
 ---
 title: "cabDataProject"
-author: "Anthony Saita, Juna Iafelice, Joelle Bracco, Nicholas Weidner"
+author: "Juna Iafelice"
 date: "5/24/2020"
 output: word_document
 ---
